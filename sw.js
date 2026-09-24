@@ -1,6 +1,6 @@
 // Guarda la app en el teléfono para que abra sin internet.
 // Si cambias index.html, sube el número de versión para que se actualice.
-const CACHE = 'mi-rutina-v1';
+const CACHE = 'mi-rutina-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 const FONT_CACHE = 'mi-rutina-fuentes';
 

@@ -80,6 +80,15 @@ h1{font-family:var(--display);font-weight:800;font-size:46px;line-height:.9;marg
 .grid{display:grid;gap:4px 8px;align-items:start}
 .grid.drop{grid-template-columns:22px 1fr 1fr}
 .grid.fixed{grid-template-columns:1.25fr 1fr 1fr 1fr}
+.grid.assist{grid-template-columns:22px 1.1fr 1fr 1fr}
+.num.calc{display:flex;align-items:center;min-height:48px;font-family:var(--display);font-weight:600;font-size:28px;line-height:1.1;
+  padding:6px 34px 6px 10px;border:1px dashed var(--line);border-radius:8px;color:var(--muted)}
+.grid.assist .num.calc[data-calc^="m"]{color:var(--ink);border-style:solid;border-color:var(--day)}
+.grid.assist .num input,.grid.assist .num.calc{font-size:24px;padding-right:24px}
+.grid.assist .unit{right:6px;font-size:11px}
+.ex-head > div{min-width:0;flex:1}
+.bw-hint{margin:6px 0 0;font-size:13px;color:var(--warn)}
+.bw-in{width:110px}
 .h{font-size:12px;color:var(--muted);padding-left:2px}
 .n{font-family:var(--display);font-weight:800;font-size:22px;color:var(--muted);text-align:center;padding-top:8px}
 .fld{display:flex;flex-direction:column;min-width:0}
@@ -126,6 +135,7 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
 .backup p.old{color:var(--warn)}
 
 @media (max-width:380px){
+  .num.calc{font-size:24px}
   .disc{width:64px;height:64px;font-size:28px;border-width:7px}
   .num input{font-size:24px}
   h1{font-size:40px}
@@ -148,6 +158,9 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     </label>
     <label>Redondear drop sets a
       <select id="step"><option value="1">1</option><option value="2.5">2.5</option><option value="5">5</option></select>
+    </label>
+    <label>Tu peso corporal (para asistidos)
+      <input class="txt bw-in" id="bw" type="text" inputmode="decimal" autocomplete="off" placeholder="–">
     </label>
   </section>
 
@@ -176,7 +189,7 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     unit: 'kg', step: 2.5,
     days: {
       A: [mk('a1','Chest Press machine','drop',12), mk('a2','Leg Press','drop',12), mk('a3','Leg Ext','drop',12),
-          mk('a4','Shoulder Press','drop',12), mk('a5','Lat Raise','drop',15), mk('a6','Dips','fijo',12)],
+          mk('a4','Shoulder Press','drop',12), mk('a5','Lat Raise','drop',15), mk('a6','Dips','asistida',12)],
       B: [mk('b1','Assisted pull ups','asistida',10), mk('b2','Hip Thrust','fijo',12), mk('b3','Leg Curl (prone)','drop',12),
           mk('b4','Db Rows','fijo',12), mk('b5','Abducciones','drop',15), mk('b6','Bicep Curl (supported)','drop',12)],
       C: [mk('c1','Leg raises (sentado)','fijo',15), mk('c2','Crunch machine','drop',15), mk('c3','Russian twists','fijo',20),
@@ -207,7 +220,9 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
   let renderPending = false;
 
   function normalizeRoutine(r) {
-    const out = { unit: r && r.unit === 'lb' ? 'lb' : 'kg', step: r && [1, 2.5, 5].includes(+r.step) ? +r.step : 2.5, days: {} };
+    const bw = r ? parseFloat(r.bw) : NaN;
+    const out = { unit: r && r.unit === 'lb' ? 'lb' : 'kg', step: r && [1, 2.5, 5].includes(+r.step) ? +r.step : 2.5,
+      bw: bw > 0 ? bw : null, days: {} };
     DAYS.forEach(d => {
       const list = r && r.days && Array.isArray(r.days[d]) ? r.days[d] : DEFAULT_ROUTINE.days[d];
       out.days[d] = list.filter(e => e && e.id).map(e => ({
@@ -219,26 +234,39 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     return out;
   }
   function findEx(id) { for (const d of DAYS) { const e = routine.days[d].find(x => x.id === id); if (e) return e; } return null; }
-  function blankLog(ex) { return { date: null, w: ex.mode === 'drop' ? [null,null,null] : [null], r: [null,null,null], note: '' }; }
+  const isDrop = ex => ex.mode !== 'fijo';
+  function blankLog(ex) { return { date: null, w: [null], r: [null,null,null], note: '' }; }
   function fitLog(ex, log) {
     const L = Object.assign(blankLog(ex), clone(log || {}));
-    const wl = ex.mode === 'drop' ? 3 : 1;
-    L.w = Array.from({ length: wl }, (_, i) => (L.w && L.w[i] != null) ? L.w[i] : null);
+    L.w = [(L.w && L.w[0] != null) ? L.w[0] : null];
     L.r = [0,1,2].map(i => (L.r && L.r[i] != null) ? L.r[i] : null);
     return L;
   }
   function roundStep(x) { const s = routine.step || 1; return +(Math.round(x / s) * s).toFixed(2); }
+  // Peso de cada serie del drop set (−30% por serie). En asistidos, además, el ajuste de la máquina.
+  function dropPlan(ex, w0) {
+    if (w0 == null) return [0,1,2].map(() => ({ w: null, m: null }));
+    const f = [1, 0.7, 0.49];
+    if (ex.mode !== 'asistida') return f.map((k, i) => ({ w: i === 0 ? w0 : roundStep(w0 * k), m: null }));
+    const bw = routine.bw;
+    return f.map((k, i) => {
+      const target = w0 * k;
+      if (!bw) return { w: i === 0 ? w0 : +target.toFixed(1), m: null };
+      const m = Math.max(0, roundStep(bw - target));
+      return { w: i === 0 ? w0 : +(bw - m).toFixed(2), m };
+    });
+  }
   function progress(ex, log) {
     if (!log) return null;
     const r = log.r || [];
     if (ex.mode === 'drop') return (r[0] != null && r[0] >= ex.top) ? 'Sube el peso inicial' : null;
+    if (ex.mode === 'asistida') return (r[0] != null && r[0] >= ex.top) ? 'Baja la asistencia' : null;
     const all = [0,1,2].every(i => r[i] != null && r[i] >= ex.top);
-    if (!all) return null;
-    return ex.mode === 'asistida' ? 'Baja la asistencia' : 'Sube el peso';
+    return all ? 'Sube el peso' : null;
   }
   function metaText(ex) {
     if (ex.mode === 'drop') return `Drop set, −30% por serie. Tope: ${ex.top} reps en la 1.ª`;
-    if (ex.mode === 'asistida') return `Asistencia fija. Tope: ${ex.top} reps en las 3`;
+    if (ex.mode === 'asistida') return `Drop set asistido, −30% por serie. Tope: ${ex.top} reps en la 1.ª`;
     return `Peso fijo, 2 min de descanso. Tope: ${ex.top} reps en las 3`;
   }
 
@@ -247,6 +275,9 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     return `<label class="fld"><span class="num"><input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="next"
       data-ex="${esc(id)}" data-f="${f}" value="${fmtNum(val)}" placeholder="–" aria-label="${esc(label)}"><span class="unit">${esc(unit)}</span></span>
       <span class="prev">${prevVal != null ? 'antes ' + fmtNum(prevVal) : ''}</span></label>`;
+  }
+  function calcField(key, val, unit, label) {
+    return `<div class="fld"><span class="num calc" data-calc="${key}" aria-label="${esc(label)}">${val == null ? '–' : fmtNum(val)}<span class="unit">${esc(unit)}</span></span><span class="prev"></span></div>`;
   }
   function logCard(ex) {
     const raw = logs[ex.id];
@@ -257,15 +288,26 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     const nm = ex.name;
     let body;
     if (ex.mode === 'drop') {
+      const plan = dropPlan(ex, L.w[0]);
       body = `<div class="grid drop"><span></span><span class="h">Peso</span><span class="h">Reps</span>` +
         [0,1,2].map(i => `<span class="n" aria-hidden="true">${i+1}</span>` +
-          numField(ex.id, 'w'+i, L.w[i], u, P && P.w ? P.w[i] : null, `${nm}, peso serie ${i+1}`) +
+          (i === 0 ? numField(ex.id, 'w0', L.w[0], u, P && P.w ? P.w[0] : null, `${nm}, peso serie 1`)
+                   : calcField('w' + i, plan[i].w, u, `${nm}, peso serie ${i+1}`)) +
           numField(ex.id, 'r'+i, L.r[i], 'reps', P && P.r ? P.r[i] : null, `${nm}, repeticiones serie ${i+1}`)).join('') +
         `</div>`;
+    } else if (ex.mode === 'asistida') {
+      const plan = dropPlan(ex, L.w[0]);
+      body = `<div class="grid assist"><span></span><span class="h">Peso neto</span><span class="h">Máquina</span><span class="h">Reps</span>` +
+        [0,1,2].map(i => `<span class="n" aria-hidden="true">${i+1}</span>` +
+          (i === 0 ? numField(ex.id, 'w0', L.w[0], u, P && P.w ? P.w[0] : null, `${nm}, peso neto serie 1`)
+                   : calcField('w' + i, plan[i].w, u, `${nm}, peso neto serie ${i+1}`)) +
+          calcField('m' + i, plan[i].m, u, `${nm}, asistencia en la máquina serie ${i+1}`) +
+          numField(ex.id, 'r'+i, L.r[i], 'reps', P && P.r ? P.r[i] : null, `${nm}, repeticiones serie ${i+1}`)).join('') +
+        `</div>` +
+        (routine.bw ? '' : `<p class="bw-hint">Escribe tu peso corporal en «Editar rutina» para ver cuánto poner en la máquina.</p>`);
     } else {
-      const wl = ex.mode === 'asistida' ? 'Asistencia' : 'Peso';
-      body = `<div class="grid fixed"><span class="h">${wl}</span><span class="h">Serie 1</span><span class="h">Serie 2</span><span class="h">Serie 3</span>` +
-        numField(ex.id, 'w0', L.w[0], u, P && P.w ? P.w[0] : null, `${nm}, ${wl.toLowerCase()}`) +
+      body = `<div class="grid fixed"><span class="h">Peso</span><span class="h">Serie 1</span><span class="h">Serie 2</span><span class="h">Serie 3</span>` +
+        numField(ex.id, 'w0', L.w[0], u, P && P.w ? P.w[0] : null, `${nm}, peso`) +
         [0,1,2].map(i => numField(ex.id, 'r'+i, L.r[i], '', P && P.r ? P.r[i] : null, `${nm}, repeticiones serie ${i+1}`)).join('') +
         `</div>`;
     }
@@ -293,7 +335,7 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
           <select data-edit="mode" data-id="${esc(ex.id)}">
             <option value="drop"${ex.mode==='drop'?' selected':''}>Drop set</option>
             <option value="fijo"${ex.mode==='fijo'?' selected':''}>Peso fijo</option>
-            <option value="asistida"${ex.mode==='asistida'?' selected':''}>Asistida</option>
+            <option value="asistida"${ex.mode==='asistida'?' selected':''}>Asistida (drop set)</option>
           </select></label>
         <label>Tope de reps
           <input class="txt top-in" type="text" inputmode="numeric" data-edit="top" data-id="${esc(ex.id)}" value="${ex.top}"></label>
@@ -317,6 +359,8 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     $('#settings').hidden = !editing;
     $('#unit').value = routine.unit;
     $('#step').value = String(routine.step);
+    const bwIn = $('#bw');
+    if (bwIn !== document.activeElement) bwIn.value = fmtNum(routine.bw);
     const list = routine.days[day];
     let html = '';
     if (editing) {
@@ -363,9 +407,17 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     const d = card.querySelector('.done');
     if (d && logs[id] && logs[id].date) d.textContent = 'Última vez: ' + fmtDate(logs[id].date);
   }
-  function setInput(id, f, v) {
-    const inp = document.querySelector(`[data-card="${CSS.escape(id)}"] [data-f="${f}"]`);
-    if (inp && inp !== document.activeElement) inp.value = fmtNum(v);
+  function updateCalcs(id) {
+    const card = document.querySelector(`[data-card="${CSS.escape(id)}"]`);
+    const ex = findEx(id);
+    if (!card || !ex || !isDrop(ex)) return;
+    const plan = dropPlan(ex, logs[id] ? logs[id].w[0] : null);
+    const u = routine.unit;
+    card.querySelectorAll('[data-calc]').forEach(el => {
+      const k = el.dataset.calc, i = +k.slice(1);
+      const v = k[0] === 'm' ? plan[i].m : plan[i].w;
+      el.firstChild.nodeValue = v == null ? '–' : fmtNum(v);
+    });
   }
 
   /* ---------- Saving ---------- */
@@ -429,6 +481,7 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     const t = e.target;
     if (t.dataset.ex && t.dataset.f) return onLogInput(t);
     if (t.dataset.edit === 'name' || t.dataset.edit === 'top') return onEditInput(t);
+    if (t.id === 'bw') { const n = parseNum(t.value); routine.bw = n > 0 ? n : null; saveRoutine(); }
   });
   document.addEventListener('change', e => {
     const t = e.target;
@@ -471,11 +524,7 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     const n = parseNum(t.value);
     const i = +f.slice(1);
     if (f[0] === 'w') {
-      log.w[i] = n;
-      if (ex.mode === 'drop' && i === 0 && n != null) {
-        log.w[1] = roundStep(n * 0.7);
-        log.w[2] = roundStep(n * 0.49);
-      }
+      log.w[0] = n;
     } else {
       log.r[i] = n == null ? null : Math.round(n);
     }
@@ -483,7 +532,7 @@ select,.txt{border:1px solid var(--line);border-radius:8px;background:var(--fiel
     saveLog(id);
     if (newSession) rerenderCard(id, f);
     else {
-      if (ex.mode === 'drop' && f === 'w0') { setInput(id, 'w1', log.w[1]); setInput(id, 'w2', log.w[2]); }
+      if (f === 'w0') updateCalcs(id);
       refreshCardMeta(id);
     }
   }
