@@ -1,0 +1,8 @@
+Mi rutina (versión sin conexión)
+
+Sube TODOS los archivos de esta carpeta, tal cual, a un hosting con https
+(GitHub Pages o Netlify). Luego abre la dirección en Chrome en tu Android
+y elige menú ⋮ > "Instalar app".
+
+Si algún día modificas index.html, cambia 'mi-rutina-v1' por 'mi-rutina-v2'
+dentro de sw.js para que el teléfono descargue la versión nueva.
